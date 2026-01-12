@@ -6,6 +6,22 @@
 node src/index.js
 ```
 
+## 🐳 Rodando com Docker
+
+1) Crie um arquivo `.env` baseado no exemplo:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+2) Suba o container:
+
+```powershell
+docker compose up --build
+```
+
+A API ficará em `http://localhost:3001`.
+
 ## 📡 Endpoints
 
 ### GET /extensions/free

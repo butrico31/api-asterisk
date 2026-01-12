@@ -1,4 +1,11 @@
 {
+  "name": "api-asterisk",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
   "dependencies": {
     "asterisk-ami-client": "^1.1.5",
     "cors": "^2.8.5",

@@ -10,13 +10,25 @@ const cors = require("cors");
 // ========================
 // CONFIGURAÇÕES
 // ========================
-const AMI_USER = "node_ami";
-const AMI_PASS = "senha123";
-const AMI_HOST = "srv762442.hstgr.cloud";
-const AMI_PORT = 5038;
+const AMI_USER = process.env.AMI_USER || "node_ami";
+const AMI_PASS = process.env.AMI_PASS || "senha123";
+const AMI_HOST = process.env.AMI_HOST || "srv762442.hstgr.cloud";
+const AMI_PORT = Number(process.env.AMI_PORT || 5038);
 
-// Defina seus ramais que o front pode usar
-const EXTENSIONS = ["3000", "3001"];
+const WSS_URL = process.env.WSS_URL || "wss://srv762442.hstgr.cloud:8089/ws";
+const EXT_PASSWORD = process.env.EXT_PASSWORD || "senha123";
+
+function parseExtensions(raw) {
+  if (!raw) return null;
+  const parts = String(raw)
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+  return parts.length ? parts : null;
+}
+
+// Defina seus ramais que o front pode usar (env EXTENSIONS="3000,3001")
+const EXTENSIONS = parseExtensions(process.env.EXTENSIONS) || ["3000", "3001"];
 
 // State Machine inicial
 const extensionState = {};
@@ -81,8 +93,8 @@ app.get("/extensions/free", (req, res) => {
 
   res.json({
     extension: freeExt,
-    password: "senha123", // substituir pela senha real
-    wss: "wss://srv762442.hstgr.cloud:8089/ws"
+    password: EXT_PASSWORD,
+    wss: WSS_URL
   });
 });
 
@@ -344,5 +356,5 @@ client.on("event", event => {
 // ========================
 // START SERVER
 // ========================
-const PORT = 3001;
+const PORT = Number(process.env.PORT || process.env.API_PORT || 3001);
 app.listen(PORT, () => console.log(`API rodando em http://localhost:${PORT}`));
