@@ -18,6 +18,8 @@ const AMI_PORT = Number(process.env.AMI_PORT || 5038);
 const WSS_URL = process.env.WSS_URL || "wss://srv762442.hstgr.cloud:8089/ws";
 const EXT_PASSWORD = process.env.EXT_PASSWORD || "senha123";
 
+const BUSY_TTL_MS = Number(process.env.BUSY_TTL_MS || 120_000); // fallback p/ liberar busy preso
+
 function parseExtensions(raw) {
   if (!raw) return null;
   const parts = String(raw)
@@ -33,14 +35,38 @@ const EXTENSIONS = parseExtensions(process.env.EXTENSIONS) || ["3000", "3001"];
 // State Machine inicial
 const extensionState = {};
 
+// Fallback: se o cliente some sem mandar Unregistered/Removed,
+// a extensão pode ficar presa em BUSY indefinidamente.
+const busyFallbackTimeouts = {};
+
 // Reserva temporária: evita entregar o mesmo ramal para dois clientes
 // caso os eventos do AMI atrasem/não cheguem.
 const extensionReservations = {};
-const RESERVATION_TTL_MS = 60_000;
+const RESERVATION_TTL_MS = 10_000;
 
 EXTENSIONS.forEach(ext => {
   extensionState[ext] = "free"; // free | busy | in_call
 });
+
+function clearBusyFallback(ext) {
+  const t = busyFallbackTimeouts[ext];
+  if (t) {
+    clearTimeout(t);
+    delete busyFallbackTimeouts[ext];
+  }
+}
+
+function scheduleBusyFallback(ext) {
+  clearBusyFallback(ext);
+  if (!BUSY_TTL_MS || BUSY_TTL_MS <= 0) return;
+  busyFallbackTimeouts[ext] = setTimeout(() => {
+    delete busyFallbackTimeouts[ext];
+    if (extensionState[ext] === "busy") {
+      extensionState[ext] = "free";
+      console.log(`[STATE] Fallback BUSY TTL expirou para ${ext} → FREE`);
+    }
+  }, BUSY_TTL_MS);
+}
 
 function extractKnownExtension(value) {
   if (!value) return null;
@@ -59,6 +85,7 @@ function clearReservation(ext) {
 
 function reserveExtension(ext) {
   clearReservation(ext);
+  clearBusyFallback(ext);
   extensionState[ext] = "reserved";
   extensionReservations[ext] = setTimeout(() => {
     delete extensionReservations[ext];
@@ -100,13 +127,14 @@ app.get("/extensions/free", (req, res) => {
 
 // API para liberar manualmente (caso necessário)
 app.post("/extensions/release", (req, res) => {
-  const ext = req.body.extension;
+  const ext = String(req.body?.extension ?? "").trim();
 
   if (!EXTENSIONS.includes(ext)) {
     return res.status(400).json({ error: "Invalid extension" });
   }
 
   clearReservation(ext);
+  clearBusyFallback(ext);
   extensionState[ext] = "free";
   console.log(`[STATE] Extensão ${ext} liberada manualmente (POST)`);
 
@@ -283,6 +311,7 @@ client.on("event", event => {
       // Assim um ramal que fica permanentemente registrado (hardphone) não trava o pool.
       if (extensionState[ext] === "reserved") {
         extensionState[ext] = "busy";
+        scheduleBusyFallback(ext);
       }
       console.log(`[AMI] ${ext} → REGISTERED (cliente conectado - BUSY)`);
     }
@@ -290,6 +319,7 @@ client.on("event", event => {
     // Quando desregistra (fechou página/reload) = libera extensão
     if (status === "Unregistered") {
       clearReservation(ext);
+      clearBusyFallback(ext);
       extensionState[ext] = "free";
       console.log(`[AMI] ${ext} → UNREGISTERED (cliente desconectou - FREE)`);
     }
@@ -313,12 +343,14 @@ client.on("event", event => {
       clearReservation(ext);
       if (extensionState[ext] === "reserved") {
         extensionState[ext] = "busy";
+        scheduleBusyFallback(ext);
       }
       console.log(`[AMI] ${ext} → CONTACT CREATED (REGISTERED - BUSY)`);
     }
 
     if (event.ContactStatus === "Removed") {
       clearReservation(ext);
+      clearBusyFallback(ext);
       extensionState[ext] = "free";
       console.log(`[AMI] ${ext} → CONTACT REMOVED (UNREGISTERED - FREE)`);
     }
@@ -333,6 +365,7 @@ client.on("event", event => {
     if (!ext) return;
 
     clearReservation(ext);
+    clearBusyFallback(ext);
     extensionState[ext] = "in_call";
     console.log(`[AMI] ${ext} → IN CALL`);
   }
@@ -348,6 +381,7 @@ client.on("event", event => {
     if (!ext) return;
 
     clearReservation(ext);
+    clearBusyFallback(ext);
     extensionState[ext] = "free";
     console.log(`[AMI] ${ext} → CALL ENDED → FREE`);
   }
